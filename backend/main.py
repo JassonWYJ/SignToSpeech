@@ -11,7 +11,6 @@ from typing import Annotated
 import joblib
 import numpy as np
 import serial
-import serial.tools.list_ports
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -20,11 +19,11 @@ from pydantic import BaseModel, Field
 BACKEND_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BACKEND_DIR / "rbf_svm_1m_raw.joblib"
 N_SENSOR_VALUES = 1025
+SERIAL_PORT = "COM3"
 BAUD_RATE = int(os.getenv("SIGN_SERIAL_BAUD", "115200"))
 CAPTURE_TIMEOUT_SECONDS = float(os.getenv("SIGN_CAPTURE_TIMEOUT", "10"))
 SERIAL_READ_TIMEOUT_SECONDS = 0.25
 SKIP_VALUES = int(os.getenv("SIGN_SKIP_VALUES", "0"))
-DEFAULT_SERIAL_PORT = os.getenv("SIGN_SERIAL_PORT")
 CAPTURE_COMMAND = os.getenv("SIGN_CAPTURE_COMMAND", "")
 NUMBER_PATTERN = re.compile(
     r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
@@ -36,19 +35,10 @@ class PredictRequest(BaseModel):
     signals: Annotated[list[float], Field(min_length=N_SENSOR_VALUES, max_length=N_SENSOR_VALUES)]
 
 
-class CaptureRequest(BaseModel):
-    port: str | None = None
-
-
 class PredictionResponse(BaseModel):
     prediction: str
     samples: int
     port: str | None = None
-
-
-class PortInfo(BaseModel):
-    device: str
-    description: str
 
 
 class CaptureTimeoutError(Exception):
@@ -87,27 +77,6 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
-
-
-def list_serial_ports() -> list[PortInfo]:
-    return [
-        PortInfo(device=port.device, description=port.description or port.device)
-        for port in serial.tools.list_ports.comports()
-    ]
-
-
-def choose_serial_port(requested_port: str | None) -> str:
-    if requested_port:
-        return requested_port
-    if DEFAULT_SERIAL_PORT:
-        return DEFAULT_SERIAL_PORT
-
-    ports = list_serial_ports()
-    if not ports:
-        raise HTTPException(status_code=503, detail="No serial device was found")
-    if len(ports) > 1:
-        raise HTTPException(status_code=409, detail="Select a serial port first")
-    return ports[0].device
 
 
 def read_sensor_values(port: str) -> np.ndarray:
@@ -172,11 +141,6 @@ def health(request: Request) -> dict[str, object]:
     }
 
 
-@app.get("/ports", response_model=list[PortInfo])
-def ports() -> list[PortInfo]:
-    return list_serial_ports()
-
-
 @app.post("/predict", response_model=PredictionResponse)
 def predict(payload: PredictRequest, request: Request) -> PredictionResponse:
     values = np.asarray(payload.signals, dtype=np.float32)
@@ -185,21 +149,17 @@ def predict(payload: PredictRequest, request: Request) -> PredictionResponse:
 
 
 @app.post("/capture-predict", response_model=PredictionResponse)
-def capture_and_predict(
-    payload: CaptureRequest,
-    request: Request,
-) -> PredictionResponse:
-    port = choose_serial_port(payload.port)
+def capture_and_predict(request: Request) -> PredictionResponse:
     if not capture_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="A capture is already in progress")
 
     try:
-        values = read_sensor_values(port)
+        values = read_sensor_values(SERIAL_PORT)
         label = predict_sign(request.app.state.model, values)
         return PredictionResponse(
             prediction=label,
             samples=len(values),
-            port=port,
+            port=SERIAL_PORT,
         )
     except CaptureTimeoutError as exc:
         raise HTTPException(

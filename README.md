@@ -24,23 +24,16 @@ npm install
 npm run serve
 ```
 
-Open <http://localhost:8080>, select the board's serial port, and click
-`Start recognition`. The backend reads exactly 1025 numeric values at 115200 baud
-and passes them directly to `backend/rbf_svm_1m_raw.joblib`.
-
-If the computer exposes multiple serial ports, the port can also be fixed before
-starting the backend:
-
-```powershell
-$env:SIGN_SERIAL_PORT = "COM3"
-python backend/main.py
-```
+Open <http://localhost:8080>. The right side is blank before recognition.
+Press `Space` or `s` to start recognition. The backend always reads `COM3`,
+collects exactly 1025 numeric values at 115200 baud, and passes them directly to
+`backend/rbf_svm_1m_raw.joblib`. The frontend then shows the predicted label and
+plays the matching MP4 from `frontend/src/assets/videos` plus its MP3 sound.
 
 Optional environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SIGN_SERIAL_PORT` | auto/select in UI | Serial device such as `COM3` |
 | `SIGN_SERIAL_BAUD` | `115200` | Serial baud rate |
 | `SIGN_CAPTURE_TIMEOUT` | `10` | Capture timeout in seconds |
 | `SIGN_SKIP_VALUES` | `0` | Numeric header values to discard before the 1025 sensors |
